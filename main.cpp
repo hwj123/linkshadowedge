@@ -22,7 +22,7 @@ struct seg_struct
 	int sflag;
 };
 
-void getgradient(cv::Mat mat)
+void getgradient(cv::Mat mat,cv::Mat& grad)
 {
 	//转换为灰度图片
 	cv::Mat gray;
@@ -41,7 +41,7 @@ void getgradient(cv::Mat mat)
 	//转换为8位单通道图像进行显示
 	double normMax;
     cv::minMaxLoc(norm,NULL,&normMax);
-	cv::Mat grad;
+	
 	norm.convertTo(grad,CV_8UC1,255.0/normMax,0);
 
 
@@ -111,28 +111,137 @@ void findEndPoint(cv::Mat mat1,vector<cv::Point2i>& pos)
 		}
 	}
 }
-void candidate_area(cv::Point2i point,vector<cv::Point2i> candiante_point_vec,cv::Mat mat,vl_uint32* segmentation)
+void candidate_area(cv::Point2i point,vector<cv::Point2i>& candiante_point_vec,cv::Mat mat,vl_uint32* segmentation)
 {
 	for(int i=0;i<mat.rows;i++)
 	{
 		for(int j=0;j<mat.cols;j++)
 		{
+			
 			if((int)segmentation[j+mat.cols*i]==(int)segmentation[point.x+mat.cols*point.y]/*&&mat.at<cv::Vec3b>(i,j)==cv::Vec3b(255,255,255)*/)
 			{
 				cv::Point2i point_temp;
 				point_temp.x = j;
 				point_temp.y = i;
 				candiante_point_vec.push_back(point_temp);
+				
 			}
 		}
 	}
 }
+void edge_grow(vector<cv::Point2i> endpoint_vec,cv::Mat grad,cv::Mat image)
+{
+   //先把断点分布在图片上？
+	for(int i=0;i<endpoint_vec.size();i++)
+	{
+		image.at<cv::Vec3b>(endpoint_vec[i].y,endpoint_vec[i].x) = cv::Vec3b(0,0,255);
+	}
+	
+	//先把相距2个像素的端点去掉
+	vector<cv::Point2i> endpoint_s_vec;
+	vector<cv::Point2i>::iterator it;
+	for(int i=0;i<endpoint_vec.size();i++)
+	{
+		bool isOnce = false;
+		bool isFind = false;
+		for(int k=-2;k<3;k++)
+		{
+			for(int l = -2;l<3;l++)
+			{
+				if((!(k==0&&l==0))&&endpoint_vec[i].x+k>0&&endpoint_vec[i].x+k<image.cols&&endpoint_vec[i].y+l>0&&endpoint_vec[i].y+l<image.rows)
+				{
+					cv::Point2i point_value;
+					point_value.x = endpoint_vec[i].x+k;
+					point_value.y = endpoint_vec[i].y+l;
+					it = find(endpoint_vec.begin(),endpoint_vec.end(),point_value);
+					if(it!=endpoint_vec.end())
+					{
+						image.at<cv::Vec3b>(endpoint_vec[i].y+(l/2),endpoint_vec[i].x+(k/2)) = cv::Vec3b(255,255,255);
+						image.at<cv::Vec3b>(endpoint_vec[i].y,endpoint_vec[i].x) = cv::Vec3b(255,255,255);
+						image.at<cv::Vec3b>(it->y,it->x) = cv::Vec3b(255,255,255);
+						isFind = true;
+					}
+					
+					
+				}
+			}
+		}
+		if(!isFind)
+		{
+			endpoint_s_vec.push_back(endpoint_vec[i]);
+		}
+	}
+	//生长
+	cv::imwrite("image_01.bmp",image);
+	cv::Point2i point_growr;
+	
+		for(int i=0;i<endpoint_s_vec.size();i++)
+		{
+			int diff = 0;
+			bool isfool = true;
+			bool iscontinue = false;
+			if(endpoint_s_vec[i].y-1>0&&endpoint_s_vec[i].x-1>0)
+			{
+				diff = ((int)grad.at<uchar>(endpoint_s_vec[i].y,endpoint_s_vec[i].x)-(int)grad.at<uchar>(endpoint_s_vec[i].y-1,endpoint_s_vec[i].x-1))*((int)grad.at<uchar>(endpoint_s_vec[i].y,endpoint_s_vec[i].x)-(int)grad.at<uchar>(endpoint_s_vec[i].y-1,endpoint_s_vec[i].x-1));
+			}
+			bool isLoop = true;
+			int times =0;
+			while(isLoop&&times<1000)
+			{
+				for(int j=-1;j<2;j++)
+				{
+					for(int k=-1;k<2;k++)
+					{
+						if(endpoint_s_vec[i].y+j>0&&endpoint_s_vec[i].y+j<image.rows&&endpoint_s_vec[i].x+k>0&&endpoint_s_vec[i].x+k<image.cols)
+						{
+							int diff_temp = ((int)grad.at<uchar>(endpoint_s_vec[i].y,endpoint_s_vec[i].x)-(int)grad.at<uchar>(endpoint_s_vec[i].y+j,endpoint_s_vec[i].x+k))* ((int)grad.at<uchar>(endpoint_s_vec[i].y,endpoint_s_vec[i].x)-(int)grad.at<uchar>(endpoint_s_vec[i].y+j,endpoint_s_vec[i].x+k));
+							if(diff_temp<diff&&image.at<cv::Vec3b>(endpoint_s_vec[i].y+j,endpoint_s_vec[i].x+k)!=cv::Vec3b(255,255,255))
+							{
+								point_growr.x = endpoint_s_vec[i].x+k;
+								point_growr.y = endpoint_s_vec[i].y+j;
+							}
+						}	
+					}
+				}
+				for(int j=-1;j<2;j++)
+				{
+					for(int k=-1;k<2;k++)
+					{
+						if(point_growr.y+j>0&&point_growr.y+j<image.rows&&point_growr.x+k>0&&point_growr.x+k<image.cols&&point_growr.y+j!=endpoint_s_vec[i].y&&point_growr.x+k!=endpoint_s_vec[i].x)
+						{
+							if(image.at<cv::Vec3b>(point_growr.y+j,point_growr.x+k)==cv::Vec3b(0,0,255)||image.at<cv::Vec3b>(point_growr.y+j,point_growr.x+k)==cv::Vec3b(255,255,255))
+							{
+								isfool = false;
+							}else
+							{
+							image.at<cv::Vec3b>(endpoint_s_vec[i].y,endpoint_s_vec[i].x)=cv::Vec3b(255,255,255);
+							image.at<cv::Vec3b>(point_growr.y,point_growr.x) = cv::Vec3b(0,0,255);
+							endpoint_s_vec[i].y = point_growr.y;
+							endpoint_s_vec[i].x = point_growr.x;
+							}
+						}
+					}
+				}
+				times++;
+				if(times==999)
+					cout<<"i="<<i<<endl;
+				cv::imshow("image_while",image);
+				cv::waitKey(0);
+			
+		}
+		cv::imwrite("image_grow_0.bmp",image);
+}
+}
+	
+
+
 int main()
 {
 	
 	cv::Mat mat = cv::imread("image_0.bmp");
 	//获得梯度
-	getgradient(mat);
+	cv::Mat grade;
+	getgradient(mat,grade);
 	cv::Mat mat_1 = cv::imread("image_1.bmp");
 	vector<cv::Point2i> endpoint_vec;
 	//获得断点
@@ -227,6 +336,7 @@ int main()
 	for(int i=0;i<endpoint_vec.size();i++)
 	{
 		candidate_area(endpoint_vec[i],candidate_vec,mat,segmentation);
+		
 	}
 	//////////////////////////////测试分类
 	cv::Mat image = cv::imread("image_0.bmp");
@@ -241,6 +351,9 @@ int main()
 	{
 
 	}
+
+	//边缘生长
+
 	
 	////////////////////////测试初始分类
 	
@@ -275,7 +388,7 @@ int main()
 	}
 	seg_vec_file.close();
 	///////////////////////输出结束
-
+	edge_grow(endpoint_vec,grade,mat_1);
 
 	///////////////////////输出
 	for(int i=0;i<value_vec.size();i++)
